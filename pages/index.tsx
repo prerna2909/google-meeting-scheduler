@@ -11,7 +11,8 @@ export default function Home() {
   const { meetings, loading, error } = useSelector((state: RootState) => state.meetings)
   
   const [scheduledTitle, setScheduledTitle] = useState('')
-  const [scheduledDateTime, setScheduledDateTime] = useState('')
+  const [scheduledDate, setScheduledDate] = useState('')
+  const [scheduledTime, setScheduledTime] = useState('')
 
   const createInstantMeeting = async () => {
     dispatch(setLoading(true))
@@ -45,10 +46,13 @@ export default function Home() {
   const createScheduledMeeting = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!scheduledTitle.trim() || !scheduledDateTime) {
+    if (!scheduledTitle.trim() || !scheduledDate || !scheduledTime) {
       dispatch(setError('Please fill in all fields'))
       return
     }
+
+    // Combine date and time
+    const scheduledDateTime = `${scheduledDate}T${scheduledTime}`
 
     dispatch(setLoading(true))
     dispatch(setError(null))
@@ -73,7 +77,8 @@ export default function Home() {
       const meetingData = await response.json()
       dispatch(addMeeting(meetingData))
       setScheduledTitle('')
-      setScheduledDateTime('')
+      setScheduledDate('')
+      setScheduledTime('')
     } catch (err) {
       dispatch(setError(err instanceof Error ? err.message : 'Failed to create meeting'))
     } finally {
@@ -142,53 +147,73 @@ export default function Home() {
         <div className="simple-grid">
           {/* Instant Meeting */}
           <div className="simple-card">
-            <h2>Instant Meeting</h2>
-            <p>Create a meeting that starts immediately</p>
-            <button
-              onClick={createInstantMeeting}
-              disabled={loading}
-              className="simple-button success"
-              style={{ width: '100%' }}
-            >
-              {loading ? 'Creating Meeting...' : 'Create Instant Meeting'}
-            </button>
+            <div className="card-content">
+              <h2>Instant Meeting</h2>
+              <p>Create a meeting that starts immediately</p>
+              <div className="card-button-container">
+                <button
+                  onClick={createInstantMeeting}
+                  disabled={loading}
+                  className="simple-button success"
+                  style={{ width: '100%' }}
+                >
+                  {loading ? 'Creating Meeting...' : 'Create Instant Meeting'}
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Scheduled Meeting */}
           <div className="simple-card">
-            <h2>Schedule Meeting</h2>
-            <form onSubmit={createScheduledMeeting}>
-              <div style={{ marginBottom: '15px' }}>
-                <label className="simple-label">Meeting Title</label>
-                <input
-                  type="text"
-                  value={scheduledTitle}
-                  onChange={(e) => setScheduledTitle(e.target.value)}
-                  className="simple-input"
-                  placeholder="Enter meeting title"
-                  required
-                />
-              </div>
-              <div style={{ marginBottom: '15px' }}>
-                <label className="simple-label">Date & Time</label>
-                <input
-                  type="datetime-local"
-                  value={scheduledDateTime}
-                  onChange={(e) => setScheduledDateTime(e.target.value)}
-                  min={new Date().toISOString().slice(0, 16)}
-                  className="simple-input"
-                  required
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="simple-button primary"
-                style={{ width: '100%' }}
-              >
-                {loading ? 'Scheduling Meeting...' : 'Schedule Meeting'}
-              </button>
-            </form>
+            <div className="card-content">
+              <h2>Schedule Meeting</h2>
+              <form onSubmit={createScheduledMeeting} style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ marginBottom: '15px' }}>
+                    <label className="simple-label">Meeting Title</label>
+                    <input
+                      type="text"
+                      value={scheduledTitle}
+                      onChange={(e) => setScheduledTitle(e.target.value)}
+                      className="simple-input"
+                      placeholder="Enter meeting title"
+                      required
+                    />
+                  </div>
+                  <div style={{ marginBottom: '15px' }}>
+                    <label className="simple-label">Date</label>
+                    <input
+                      type="date"
+                      value={scheduledDate}
+                      onChange={(e) => setScheduledDate(e.target.value)}
+                      min={new Date().toISOString().split('T')[0]}
+                      className="simple-input"
+                      required
+                    />
+                  </div>
+                  <div style={{ marginBottom: '15px' }}>
+                    <label className="simple-label">Time</label>
+                    <input
+                      type="time"
+                      value={scheduledTime}
+                      onChange={(e) => setScheduledTime(e.target.value)}
+                      className="simple-input"
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="card-button-container">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="simple-button primary"
+                    style={{ width: '100%' }}
+                  >
+                    {loading ? 'Scheduling Meeting...' : 'Schedule Meeting'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
 
