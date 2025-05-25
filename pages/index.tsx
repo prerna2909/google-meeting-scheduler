@@ -6,7 +6,15 @@ import { addMeeting, setLoading, setError } from '../store'
 import { format } from 'date-fns'
 
 export default function Home() {
-  const { data: session, status } = useSession()
+ const { data: session, status } = useSession()
+
+    // Add debugging - remove this after fixing
+    console.log('Client session:', {
+    status,
+    hasSession: !!session,
+    hasAccessToken: !!session?.accessToken,
+    userEmail: session?.user?.email
+    })
   const dispatch = useDispatch()
   const { meetings, loading, error } = useSelector((state: RootState) => state.meetings)
   
