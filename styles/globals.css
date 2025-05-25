@@ -167,6 +167,20 @@ a {
   padding-top: 15px;
 }
 
+/* Timezone info banner */
+.timezone-info {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  color: #495057;
+}
+
+/* Time conflict warning */
+.time-conflict-warning {
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  color: #856404;
+}
+
 /* Dark mode support - minimal changes */
 @media (prefers-color-scheme: dark) {
   html {
@@ -241,5 +255,19 @@ a {
   .meeting-badge.scheduled {
     background: #1e2a4a;
     color: #87ceeb;
+  }
+
+  /* Timezone info for dark mode */
+  .timezone-info {
+    background: #2d3748;
+    border-color: #4a5568;
+    color: #e2e8f0;
+  }
+
+  /* Time conflict warning for dark mode */
+  .time-conflict-warning {
+    background: #744210;
+    border-color: #975a16;
+    color: #fbd38d;
   }
 }

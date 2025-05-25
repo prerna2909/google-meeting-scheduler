@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSession, signIn, signOut } from 'next-auth/react'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState } from '../store'
@@ -21,11 +21,94 @@ export default function Home() {
   const [scheduledTitle, setScheduledTitle] = useState('')
   const [scheduledDate, setScheduledDate] = useState('')
   const [scheduledTime, setScheduledTime] = useState('')
+  const [currentDateTime, setCurrentDateTime] = useState<Date>(new Date())
+  const [timeConflictWarning, setTimeConflictWarning] = useState('')
 
-  // Get current date and time for validation
-  const now = new Date()
-  const currentDate = now.toISOString().split('T')[0] // YYYY-MM-DD format
-  const currentTime = now.toTimeString().slice(0, 5) // HH:MM format
+  // Update current time every minute to keep validation accurate
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentDateTime(new Date())
+    }, 60000) // Update every minute
+
+    return () => clearInterval(timer)
+  }, [])
+
+  // Check for time conflicts and show warning (non-blocking)
+  const checkTimeConflicts = () => {
+    if (!scheduledDate || !scheduledTime) {
+      setTimeConflictWarning('')
+      return
+    }
+
+    const selectedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`)
+    
+    const conflictingMeetings = meetings.filter(meeting => {
+      if (meeting.isInstant || !meeting.scheduledTime) {
+        return false
+      }
+      
+      const existingDateTime = new Date(typeof meeting.scheduledTime === 'string' 
+        ? meeting.scheduledTime 
+        : meeting.scheduledTime.toString())
+      
+      // Check if the exact date and time match (same minute)
+      return selectedDateTime.getTime() === existingDateTime.getTime()
+    })
+
+    if (conflictingMeetings.length > 0) {
+      const firstConflict = conflictingMeetings[0]
+      if (firstConflict.scheduledTime) {
+        const conflictTime = formatMeetingTime(firstConflict.scheduledTime)
+        if (conflictingMeetings.length === 1) {
+          setTimeConflictWarning(`⚠️ You already have "${firstConflict.title}" scheduled at exactly this time: ${conflictTime}`)
+        } else {
+          setTimeConflictWarning(`⚠️ You have ${conflictingMeetings.length} meetings scheduled at exactly this same time`)
+        }
+      } else {
+        setTimeConflictWarning(`⚠️ You have ${conflictingMeetings.length} meetings scheduled at exactly this same time`)
+      }
+    } else {
+      setTimeConflictWarning('')
+    }
+  }
+
+  // Check for conflicts whenever date/time changes
+  useEffect(() => {
+    checkTimeConflicts()
+  }, [scheduledDate, scheduledTime, meetings])
+
+  // Get standardized timezone info
+  const getTimezoneInfo = () => {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const now = new Date()
+    const offset = now.getTimezoneOffset()
+    const offsetHours = Math.abs(Math.floor(offset / 60))
+    const offsetMinutes = Math.abs(offset % 60)
+    const offsetSign = offset <= 0 ? '+' : '-'
+    const offsetString = `UTC${offsetSign}${offsetHours.toString().padStart(2, '0')}:${offsetMinutes.toString().padStart(2, '0')}`
+    
+    return {
+      timeZone,
+      offsetString,
+      display: `${timeZone} (${offsetString})`
+    }
+  }
+
+  const timezoneInfo = getTimezoneInfo()
+
+  // Get current date and time in proper format for inputs
+  const getCurrentDateTimeStrings = () => {
+    const now = currentDateTime
+    const currentDate = now.getFullYear() + '-' + 
+                       String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                       String(now.getDate()).padStart(2, '0')
+    const currentTime = String(now.getHours()).padStart(2, '0') + ':' + 
+                       String(now.getMinutes()).padStart(2, '0')
+    
+    return { currentDate, currentTime }
+  }
+
+  const { currentDate, currentTime } = getCurrentDateTimeStrings()
 
   const createInstantMeeting = async () => {
     dispatch(setLoading(true))
@@ -62,13 +145,22 @@ export default function Home() {
       return 'Please select both date and time'
     }
 
-    const selectedDateTime = new Date(`${scheduledDate}T${scheduledTime}`)
-    const now = new Date()
-
-    if (selectedDateTime <= now) {
-      return 'Please select a future date and time'
+    // Create date object from selected date and time
+    const selectedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`)
+    
+    // Check if the selected time is in the past
+    if (selectedDateTime <= currentDateTime) {
+      const timeDiff = Math.floor((currentDateTime.getTime() - selectedDateTime.getTime()) / (1000 * 60))
+      if (timeDiff < 1) {
+        return 'Please select a time at least 1 minute in the future'
+      } else if (timeDiff < 60) {
+        return `Selected time is ${timeDiff} minutes in the past. Please select a future time.`
+      } else {
+        return 'Please select a future date and time'
+      }
     }
 
+    // Note: Time conflict checking is now handled separately as a warning, not an error
     return null
   }
 
@@ -86,8 +178,9 @@ export default function Home() {
       return
     }
 
-    // Combine date and time - this will be in user's local timezone
-    const scheduledDateTime = `${scheduledDate}T${scheduledTime}`
+    // Create proper ISO string for the selected date/time
+    const selectedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`)
+    const scheduledTimeISO = selectedDateTime.toISOString()
 
     dispatch(setLoading(true))
     dispatch(setError(null))
@@ -100,7 +193,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           title: scheduledTitle,
-          scheduledTime: scheduledDateTime,
+          scheduledTime: scheduledTimeISO,
           isInstant: false
         })
       })
@@ -127,8 +220,15 @@ export default function Home() {
     alert('Meeting link copied to clipboard!')
   }
 
-  // Get user's timezone for display
-  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  // Format meeting time for display
+  const formatMeetingTime = (dateInput: string | Date) => {
+    try {
+      const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput
+      return format(date, 'PPp') // Will show in user's local timezone
+    } catch (error) {
+      return 'Invalid date' + error
+    }
+  }
 
   if (status === 'loading') {
     return (
@@ -177,8 +277,17 @@ export default function Home() {
       {/* Main Content */}
       <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
         {/* Timezone Info */}
-        <div style={{ marginBottom: '20px', padding: '10px', backgroundColor: '#e8f4fd', borderRadius: '4px', fontSize: '14px' }}>
-          <strong>Timezone:</strong> {userTimezone} | All times are in your local timezone
+        <div className="timezone-info" style={{ 
+          marginBottom: '20px', 
+          padding: '12px', 
+          borderRadius: '4px', 
+          fontSize: '14px'
+        }}>
+          <strong>Timezone:</strong> {timezoneInfo.display} | All times are in your local timezone
+          <br />
+          <small style={{ opacity: 0.8 }}>
+            Current time: {currentDateTime.toLocaleString()}
+          </small>
         </div>
 
         {error && (
@@ -238,7 +347,7 @@ export default function Home() {
                       onChange={(e) => {
                         setScheduledDate(e.target.value)
                         // Clear error when user changes date
-                        if (error && error.includes('future')) {
+                        if (error && (error.includes('future') || error.includes('past'))) {
                           dispatch(setError(null))
                         }
                       }}
@@ -255,7 +364,7 @@ export default function Home() {
                       onChange={(e) => {
                         setScheduledTime(e.target.value)
                         // Clear error when user changes time
-                        if (error && error.includes('future')) {
+                        if (error && (error.includes('future') || error.includes('past'))) {
                           dispatch(setError(null))
                         }
                       }}
@@ -264,6 +373,31 @@ export default function Home() {
                       required
                     />
                   </div>
+                  {scheduledDate && scheduledTime && (
+                    <div style={{ 
+                      fontSize: '12px', 
+                      color: '#666', 
+                      padding: '8px', 
+                      backgroundColor: '#f8f9fa', 
+                      borderRadius: '4px',
+                      marginBottom: '10px'
+                    }}>
+                      Selected: {new Date(`${scheduledDate}T${scheduledTime}`).toLocaleString()}
+                    </div>
+                  )}
+                  {timeConflictWarning && (
+                    <div style={{ 
+                      fontSize: '13px', 
+                      color: '#856404', 
+                      backgroundColor: '#fff3cd',
+                      border: '1px solid #ffeaa7',
+                      padding: '8px', 
+                      borderRadius: '4px',
+                      marginBottom: '10px'
+                    }}>
+                      {timeConflictWarning}
+                    </div>
+                  )}
                 </div>
                 <div className="card-button-container">
                   <button
@@ -294,7 +428,7 @@ export default function Home() {
                 </div>
                 {meeting.scheduledTime && (
                   <p style={{ margin: '5px 0', color: '#666' }}>
-                    Scheduled for: {format(new Date(meeting.scheduledTime), 'PPp')}
+                    Scheduled for: {formatMeetingTime(meeting.scheduledTime)}
                   </p>
                 )}
                 {meeting.isInstant && (
