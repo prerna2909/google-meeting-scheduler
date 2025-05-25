@@ -1,137 +1,124 @@
+// pages/api/create-meeting.ts
 import { NextApiRequest, NextApiResponse } from 'next'
-import { getToken } from 'next-auth/jwt'
+import { getServerSession } from 'next-auth/next'
+import { authOptions } from './auth/[...nextauth]'
 import { google } from 'googleapis'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  console.log('=== API CALL START ===')
-  console.log('Method:', req.method)
-
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method not allowed' })
   }
 
   try {
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET })
-    console.log('Token result:', {
-      exists: !!token,
-      hasAccessToken: !!token?.accessToken,
-      hasRefreshToken: !!token?.refreshToken,
-      email: token?.email
-    })
-
-    if (!token || !token.accessToken) {
-      console.log('ERROR: No access token found')
-      return res.status(401).json({ 
-        message: 'Unauthorized - No access token found'
-      })
+    const session = await getServerSession(req, res, authOptions)
+    
+    if (!session?.accessToken) {
+      return res.status(401).json({ message: 'Not authenticated' })
     }
 
     const { title, scheduledTime, isInstant } = req.body
-    console.log('Request body:', { title, scheduledTime, isInstant })
 
-    // For scheduled meetings, validate the time is in the future
-    if (!isInstant && scheduledTime) {
-      const scheduledDate = new Date(scheduledTime)
-      const now = new Date()
-      
-      if (scheduledDate <= now) {
-        return res.status(400).json({ 
-          message: 'Scheduled time must be in the future'
-        })
-      }
-    }
-
-    // Set up Google Calendar API with automatic token refresh
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.NEXTAUTH_URL ? `${process.env.NEXTAUTH_URL}/api/auth/callback/google` : 'http://localhost:3000/api/auth/callback/google'
+      process.env.GOOGLE_CLIENT_SECRET
     )
-
-    console.log('Setting credentials with refresh capability...')
     oauth2Client.setCredentials({
-      access_token: token.accessToken as string,
-      refresh_token: token.refreshToken as string
+      access_token: session.accessToken
     })
 
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
 
-    // If refresh token is missing, proceed anyway (for testing)
-    if (!token.refreshToken) {
-      console.log('WARNING: No refresh token - tokens may expire')
-    }
-
-    let meetingData;
-
-    if (isInstant) {
-      // For instant meetings, just create a Meet link without calendar event
-      console.log('Creating instant meeting without calendar event...')
-      
-      // Generate a simple meeting ID for instant meetings
-      const meetingId = Math.random().toString(36).substring(7)
-      
-      meetingData = {
-        id: `instant_${meetingId}`,
-        title: title || 'Instant Meeting',
-        meetLink: `https://meet.google.com/${meetingId}`, // Simple Meet link
-        scheduledTime: null,
-        isInstant: true,
-        createdAt: new Date().toISOString()
-      }
-      
-      console.log('Instant meeting created (no calendar event)')
-    } else {
-      // For scheduled meetings, create calendar event with Meet link
-      console.log('Creating scheduled meeting with calendar event...')
-      
-      const startTime = new Date(scheduledTime)
-      const endTime = new Date(startTime.getTime() + 60 * 60 * 1000) // 1 hour duration
-
-      const event = {
-        summary: title || 'Scheduled Meeting',
-        start: {
-          dateTime: startTime.toISOString(),
-          timeZone: 'UTC', // Store in UTC, but will display in user's timezone
-        },
-        end: {
-          dateTime: endTime.toISOString(),
-          timeZone: 'UTC',
-        },
-        conferenceData: {
-          createRequest: {
-            requestId: Math.random().toString(36).substring(7),
-            conferenceSolutionKey: {
-              type: 'hangoutsMeet'
-            }
+    interface EventData {
+      summary: string
+      conferenceData: {
+        createRequest: {
+          requestId: string
+          conferenceSolutionKey: {
+            type: string
           }
         }
       }
-
-      // Create the calendar event
-      const response = await calendar.events.insert({
-        calendarId: 'primary',
-        requestBody: event,
-        conferenceDataVersion: 1
-      })
-
-      meetingData = {
-        id: response.data.id,
-        title: event.summary,
-        meetLink: response.data.conferenceData?.entryPoints?.[0]?.uri || response.data.hangoutLink,
-        scheduledTime: startTime.toISOString(),
-        isInstant: false,
-        createdAt: new Date().toISOString()
+      attendees: Array<{
+        email: string | null | undefined
+      }>
+      start: {
+        dateTime: string
+        timeZone: string
       }
-      
-      console.log('Scheduled meeting created with calendar event')
+      end: {
+        dateTime: string
+        timeZone: string
+      }
     }
 
-    console.log('=== API CALL SUCCESS ===')
+    let startTime: Date
+    let endTime: Date
+
+    if (isInstant) {
+      // For instant meetings, start in 2 minutes to avoid validation issues
+      const now = new Date()
+      startTime = new Date(now.getTime() + 120000) // Start in 2 minutes
+      endTime = new Date(startTime.getTime() + 3600000) // 1 hour duration
+    } else {
+      // Scheduled meetings
+      startTime = new Date(scheduledTime)
+      endTime = new Date(startTime.getTime() + 3600000) // 1 hour duration
+    }
+
+    const eventData: EventData = {
+      summary: title,
+      conferenceData: {
+        createRequest: {
+          requestId: `meeting-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          conferenceSolutionKey: {
+            type: 'hangoutsMeet'
+          }
+        }
+      },
+      attendees: [
+        {
+          email: session.user?.email
+        }
+      ],
+      start: {
+        dateTime: startTime.toISOString(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      },
+      end: {
+        dateTime: endTime.toISOString(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      }
+    }
+
+    const response = await calendar.events.insert({
+      calendarId: 'primary',
+      conferenceDataVersion: 1,
+      requestBody: eventData
+    })
+
+    const event = response.data
+    
+    const meetLink = event.conferenceData?.entryPoints?.find(
+      (entry) => entry.entryPointType === 'video'
+    )?.uri
+
+    if (!meetLink) {
+      throw new Error('Failed to generate Google Meet link')
+    }
+
+    const meetingData = {
+      id: event.id,
+      title: event.summary,
+      meetLink: meetLink,
+      scheduledTime: isInstant ? null : scheduledTime,
+      isInstant: isInstant,
+      calendarEventId: event.id
+    }
+
     res.status(200).json(meetingData)
+
   } catch (error) {
-    console.error('=== API CALL ERROR ===')
-    console.error('Error details:', error)
-    console.error('Error message:', error instanceof Error ? error.message : 'Unknown error')
+    console.error('Error creating meeting:', error)
     
     res.status(500).json({ 
       message: 'Failed to create meeting',
