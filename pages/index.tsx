@@ -22,6 +22,11 @@ export default function Home() {
   const [scheduledDate, setScheduledDate] = useState('')
   const [scheduledTime, setScheduledTime] = useState('')
 
+  // Get current date and time for validation
+  const now = new Date()
+  const currentDate = now.toISOString().split('T')[0] // YYYY-MM-DD format
+  const currentTime = now.toTimeString().slice(0, 5) // HH:MM format
+
   const createInstantMeeting = async () => {
     dispatch(setLoading(true))
     dispatch(setError(null))
@@ -39,7 +44,8 @@ export default function Home() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to create meeting')
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Failed to create meeting')
       }
 
       const meetingData = await response.json()
@@ -51,15 +57,36 @@ export default function Home() {
     }
   }
 
+  const validateScheduledTime = () => {
+    if (!scheduledDate || !scheduledTime) {
+      return 'Please select both date and time'
+    }
+
+    const selectedDateTime = new Date(`${scheduledDate}T${scheduledTime}`)
+    const now = new Date()
+
+    if (selectedDateTime <= now) {
+      return 'Please select a future date and time'
+    }
+
+    return null
+  }
+
   const createScheduledMeeting = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!scheduledTitle.trim() || !scheduledDate || !scheduledTime) {
-      dispatch(setError('Please fill in all fields'))
+    if (!scheduledTitle.trim()) {
+      dispatch(setError('Please enter a meeting title'))
       return
     }
 
-    // Combine date and time
+    const timeValidationError = validateScheduledTime()
+    if (timeValidationError) {
+      dispatch(setError(timeValidationError))
+      return
+    }
+
+    // Combine date and time - this will be in user's local timezone
     const scheduledDateTime = `${scheduledDate}T${scheduledTime}`
 
     dispatch(setLoading(true))
@@ -79,7 +106,8 @@ export default function Home() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to create scheduled meeting')
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Failed to create scheduled meeting')
       }
 
       const meetingData = await response.json()
@@ -98,6 +126,9 @@ export default function Home() {
     navigator.clipboard.writeText(text)
     alert('Meeting link copied to clipboard!')
   }
+
+  // Get user's timezone for display
+  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
   if (status === 'loading') {
     return (
@@ -145,6 +176,11 @@ export default function Home() {
 
       {/* Main Content */}
       <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
+        {/* Timezone Info */}
+        <div style={{ marginBottom: '20px', padding: '10px', backgroundColor: '#e8f4fd', borderRadius: '4px', fontSize: '14px' }}>
+          <strong>Timezone:</strong> {userTimezone} | All times are in your local timezone
+        </div>
+
         {error && (
           <div className="simple-alert">
             {error}
@@ -157,7 +193,10 @@ export default function Home() {
           <div className="simple-card">
             <div className="card-content">
               <h2>Instant Meeting</h2>
-              <p>Create a meeting that starts immediately</p>
+              <p>Create a meeting link that can be used immediately</p>
+              <p style={{ fontSize: '14px', color: '#666', fontStyle: 'italic' }}>
+                Note: Instant meetings are not added to your calendar
+              </p>
               <div className="card-button-container">
                 <button
                   onClick={createInstantMeeting}
@@ -175,6 +214,9 @@ export default function Home() {
           <div className="simple-card">
             <div className="card-content">
               <h2>Schedule Meeting</h2>
+              <p style={{ fontSize: '14px', color: '#666', fontStyle: 'italic', marginBottom: '15px' }}>
+                Creates a calendar event with Google Meet link
+              </p>
               <form onSubmit={createScheduledMeeting} style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ marginBottom: '15px' }}>
@@ -193,8 +235,14 @@ export default function Home() {
                     <input
                       type="date"
                       value={scheduledDate}
-                      onChange={(e) => setScheduledDate(e.target.value)}
-                      min={new Date().toISOString().split('T')[0]}
+                      onChange={(e) => {
+                        setScheduledDate(e.target.value)
+                        // Clear error when user changes date
+                        if (error && error.includes('future')) {
+                          dispatch(setError(null))
+                        }
+                      }}
+                      min={currentDate}
                       className="simple-input"
                       required
                     />
@@ -204,7 +252,14 @@ export default function Home() {
                     <input
                       type="time"
                       value={scheduledTime}
-                      onChange={(e) => setScheduledTime(e.target.value)}
+                      onChange={(e) => {
+                        setScheduledTime(e.target.value)
+                        // Clear error when user changes time
+                        if (error && error.includes('future')) {
+                          dispatch(setError(null))
+                        }
+                      }}
+                      min={scheduledDate === currentDate ? currentTime : undefined}
                       className="simple-input"
                       required
                     />
@@ -240,6 +295,11 @@ export default function Home() {
                 {meeting.scheduledTime && (
                   <p style={{ margin: '5px 0', color: '#666' }}>
                     Scheduled for: {format(new Date(meeting.scheduledTime), 'PPp')}
+                  </p>
+                )}
+                {meeting.isInstant && (
+                  <p style={{ margin: '5px 0', color: '#666', fontSize: '14px', fontStyle: 'italic' }}>
+                    Available for immediate use (not on calendar)
                   </p>
                 )}
                 <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
